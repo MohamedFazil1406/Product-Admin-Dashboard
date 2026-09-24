@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { getProducts } from "@/services/product.service";
 import { Product } from "@/types/product";
 
 import Pagination from "@/components/Pagination";
+import SearchInput from "@/components/SearchInput";
 
 export default function ProductsPage() {
   const router = useRouter();
@@ -14,6 +16,8 @@ export default function ProductsPage() {
 
   const pageParam = Number(searchParams.get("page"));
   const limitParam = Number(searchParams.get("limit"));
+
+  const search = searchParams.get("search") ?? "";
 
   const page = Number.isInteger(pageParam) && pageParam > 0 ? pageParam : 1;
 
@@ -26,6 +30,8 @@ export default function ProductsPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
+    const controller = new AbortController();
+
     const loadProducts = async () => {
       try {
         setLoading(true);
@@ -34,34 +40,79 @@ export default function ProductsPage() {
         const data = await getProducts({
           page,
           limit,
+          search,
+          signal: controller.signal,
         });
 
         const totalPages = Math.ceil(data.total / limit);
 
         if (totalPages > 0 && page > totalPages) {
-          router.replace(`/products?page=${totalPages}&limit=${limit}`);
+          router.replace(
+            `/products?page=${totalPages}&limit=${limit}${
+              search ? `&search=${encodeURIComponent(search)}` : ""
+            }`,
+          );
+
           return;
         }
 
         setProducts(data.products);
         setTotal(data.total);
-      } catch {
+      } catch (error) {
+        if (error instanceof Error && error.name === "CanceledError") {
+          return;
+        }
+
         setError("Failed to load products.");
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
       }
     };
 
     loadProducts();
-  }, [page, limit, router]);
+
+    return () => {
+      controller.abort();
+    };
+  }, [page, limit, search, router]);
 
   const changePage = (newPage: number) => {
-    router.push(`/products?page=${newPage}&limit=${limit}`);
+    const params = new URLSearchParams(searchParams.toString());
+
+    params.set("page", String(newPage));
+    params.set("limit", String(limit));
+
+    router.push(`/products?${params.toString()}`);
   };
 
   const changeLimit = (newLimit: number) => {
-    router.push(`/products?page=1&limit=${newLimit}`);
+    const params = new URLSearchParams(searchParams.toString());
+
+    params.set("page", "1");
+    params.set("limit", String(newLimit));
+
+    router.push(`/products?${params.toString()}`);
   };
+
+  const changeSearch = useCallback(
+    (value: string) => {
+      const params = new URLSearchParams(searchParams.toString());
+
+      if (value.trim()) {
+        params.set("search", value.trim());
+      } else {
+        params.delete("search");
+      }
+
+      // Search change must reset page
+      params.set("page", "1");
+
+      router.push(`/products?${params.toString()}`);
+    },
+    [router, searchParams],
+  );
 
   if (loading) {
     return <div className="p-8">Loading products...</div>;
@@ -85,20 +136,24 @@ export default function ProductsPage() {
   return (
     <main className="p-6">
       <div className="mx-auto max-w-7xl">
-        <div className="mb-6 flex items-center justify-between">
+        <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <h1 className="text-2xl font-bold">Products</h1>
 
-          <select
-            value={limit}
-            onChange={(event) => changeLimit(Number(event.target.value))}
-            className="rounded border px-3 py-2"
-          >
-            <option value={10}>10 per page</option>
+          <div className="flex flex-col gap-3 md:flex-row">
+            <SearchInput value={search} onSearch={changeSearch} />
 
-            <option value={20}>20 per page</option>
+            <select
+              value={limit}
+              onChange={(event) => changeLimit(Number(event.target.value))}
+              className="rounded border px-3 py-2"
+            >
+              <option value={10}>10 per page</option>
 
-            <option value={50}>50 per page</option>
-          </select>
+              <option value={20}>20 per page</option>
+
+              <option value={50}>50 per page</option>
+            </select>
+          </div>
         </div>
 
         {products.length === 0 ? (

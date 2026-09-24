@@ -15,12 +15,12 @@ export default function SearchInput({ value, onSearch }: SearchInputProps) {
   }, [value]);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
+    const timeout = setTimeout(() => {
       onSearch(input);
     }, 500);
 
     return () => {
-      clearTimeout(timer);
+      clearTimeout(timeout);
     };
   }, [input, onSearch]);
 
