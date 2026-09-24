@@ -36,6 +36,13 @@ export default function ProductsPage() {
           limit,
         });
 
+        const totalPages = Math.ceil(data.total / limit);
+
+        if (totalPages > 0 && page > totalPages) {
+          router.replace(`/products?page=${totalPages}&limit=${limit}`);
+          return;
+        }
+
         setProducts(data.products);
         setTotal(data.total);
       } catch {
@@ -46,9 +53,7 @@ export default function ProductsPage() {
     };
 
     loadProducts();
-  }, [page, limit]);
-
-  const totalPages = Math.ceil(total / limit);
+  }, [page, limit, router]);
 
   const changePage = (newPage: number) => {
     router.push(`/products?page=${newPage}&limit=${limit}`);
@@ -89,56 +94,71 @@ export default function ProductsPage() {
             className="rounded border px-3 py-2"
           >
             <option value={10}>10 per page</option>
+
             <option value={20}>20 per page</option>
+
             <option value={50}>50 per page</option>
           </select>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse bg-white">
-            <thead>
-              <tr className="border-b bg-gray-100">
-                <th className="p-3 text-left">Image</th>
-                <th className="p-3 text-left">Title</th>
-                <th className="p-3 text-left">Category</th>
-                <th className="p-3 text-left">Price</th>
-                <th className="p-3 text-left">Rating</th>
-                <th className="p-3 text-left">Stock</th>
-              </tr>
-            </thead>
+        {products.length === 0 ? (
+          <div className="rounded border p-8 text-center">
+            <p className="text-gray-600">No products found.</p>
+          </div>
+        ) : (
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse bg-white">
+                <thead>
+                  <tr className="border-b bg-gray-100">
+                    <th className="p-3 text-left">Image</th>
 
-            <tbody>
-              {products.map((product) => (
-                <tr key={product.id} className="border-b">
-                  <td className="p-3">
-                    <img
-                      src={product.thumbnail}
-                      alt={product.title}
-                      className="h-14 w-14 rounded object-cover"
-                    />
-                  </td>
+                    <th className="p-3 text-left">Title</th>
 
-                  <td className="p-3 font-medium">{product.title}</td>
+                    <th className="p-3 text-left">Category</th>
 
-                  <td className="p-3">{product.category}</td>
+                    <th className="p-3 text-left">Price</th>
 
-                  <td className="p-3">${product.price}</td>
+                    <th className="p-3 text-left">Rating</th>
 
-                  <td className="p-3">{product.rating}</td>
+                    <th className="p-3 text-left">Stock</th>
+                  </tr>
+                </thead>
 
-                  <td className="p-3">{product.stock}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                <tbody>
+                  {products.map((product) => (
+                    <tr key={product.id} className="border-b hover:bg-gray-50">
+                      <td className="p-3">
+                        <img
+                          src={product.thumbnail}
+                          alt={product.title}
+                          className="h-14 w-14 rounded object-cover"
+                        />
+                      </td>
 
-        <Pagination
-          page={page}
-          limit={limit}
-          total={total}
-          onPageChange={changePage}
-        />
+                      <td className="p-3 font-medium">{product.title}</td>
+
+                      <td className="p-3">{product.category}</td>
+
+                      <td className="p-3">${product.price}</td>
+
+                      <td className="p-3">{product.rating}</td>
+
+                      <td className="p-3">{product.stock}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <Pagination
+              page={page}
+              limit={limit}
+              total={total}
+              onPageChange={changePage}
+            />
+          </>
+        )}
       </div>
     </main>
   );
