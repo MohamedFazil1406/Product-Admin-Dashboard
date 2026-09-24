@@ -11,62 +11,47 @@ import Pagination from "@/components/Pagination";
 import SearchInput from "@/components/SearchInput";
 import ProductFilters from "@/components/ProductFilters";
 
+import {
+  applyLocalChanges,
+  getAddedProducts,
+} from "@/libs/product-local-store";
+
 export default function ProductsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  /*
-   * Using a string instead of searchParams directly
-   * makes dependencies more stable.
-   */
   const queryString = searchParams.toString();
 
-  /*
-   * URL values
-   */
   const pageParam = Number(searchParams.get("page"));
   const limitParam = Number(searchParams.get("limit"));
 
   const search = searchParams.get("search") ?? "";
-
   const category = searchParams.get("category") ?? "";
-
   const sortBy = searchParams.get("sort") ?? "";
 
   const order: "asc" | "desc" =
     searchParams.get("order") === "desc" ? "desc" : "asc";
 
   /*
-   * Validate page.
-   *
-   * ?page=abc
-   * ?page=-5
-   *
-   * becomes page 1.
+   * Validate URL values
    */
   const page = Number.isInteger(pageParam) && pageParam > 0 ? pageParam : 1;
 
-  /*
-   * Only allow page sizes required
-   * by the assignment.
-   */
   const limit = [10, 20, 50].includes(limitParam) ? limitParam : 10;
 
   /*
    * State
    */
   const [products, setProducts] = useState<Product[]>([]);
-
   const [categories, setCategories] = useState<string[]>([]);
 
   const [total, setTotal] = useState(0);
 
   const [loading, setLoading] = useState(true);
-
   const [error, setError] = useState("");
 
   /*
-   * Load categories once.
+   * Load categories once
    */
   useEffect(() => {
     const loadCategories = async () => {
@@ -75,7 +60,7 @@ export default function ProductsPage() {
 
         setCategories(data);
       } catch {
-        console.error("Failed to load categories");
+        console.error("Failed to load categories.");
       }
     };
 
@@ -83,10 +68,7 @@ export default function ProductsPage() {
   }, []);
 
   /*
-   * Load products.
-   *
-   * AbortController prevents an older
-   * request from overwriting a newer one.
+   * Load products
    */
   useEffect(() => {
     const controller = new AbortController();
@@ -106,7 +88,73 @@ export default function ProductsPage() {
           signal: controller.signal,
         });
 
-        const totalPages = Math.ceil(data.total / limit);
+        /*
+         * First apply locally edited/deleted
+         * products to API results.
+         */
+        let finalProducts = applyLocalChanges(data.products);
+
+        /*
+         * DummyJSON doesn't persist newly
+         * created products.
+         *
+         * Show locally added products at the
+         * beginning of page 1 when viewing the
+         * normal product list.
+         */
+        let addedProducts: Product[] = [];
+
+        if (page === 1 && !search && !category) {
+          addedProducts = getAddedProducts();
+
+          /*
+           * Apply edits/deletes to locally
+           * added products too.
+           */
+          addedProducts = applyLocalChanges(addedProducts);
+
+          finalProducts = [...addedProducts, ...finalProducts];
+        }
+
+        /*
+         * Optional local sorting.
+         *
+         * API results are already sorted,
+         * but local products also need
+         * sorting when they are included.
+         */
+        if (sortBy) {
+          finalProducts = [...finalProducts].sort((a, b) => {
+            let result = 0;
+
+            if (sortBy === "price") {
+              result = a.price - b.price;
+            }
+
+            if (sortBy === "rating") {
+              result = a.rating - b.rating;
+            }
+
+            if (sortBy === "title") {
+              result = a.title.localeCompare(b.title);
+            }
+
+            return order === "desc" ? -result : result;
+          });
+        }
+
+        /*
+         * Calculate total.
+         *
+         * Locally added products should count
+         * in the normal unfiltered view.
+         */
+        const localAddedCount =
+          !search && !category ? getAddedProducts().length : 0;
+
+        const adjustedTotal = data.total + localAddedCount;
+
+        const totalPages = Math.ceil(adjustedTotal / limit);
 
         /*
          * Handle ?page=999
@@ -121,14 +169,9 @@ export default function ProductsPage() {
           return;
         }
 
-        setProducts(data.products);
-
-        setTotal(data.total);
+        setProducts(finalProducts);
+        setTotal(adjustedTotal);
       } catch (error) {
-        /*
-         * Ignore intentionally cancelled
-         * Axios requests.
-         */
         if (error instanceof Error && error.name === "CanceledError") {
           return;
         }
@@ -162,7 +205,7 @@ export default function ProductsPage() {
   };
 
   /*
-   * Page size
+   * Change page size
    */
   const changeLimit = (newLimit: number) => {
     const params = new URLSearchParams(queryString);
@@ -176,9 +219,6 @@ export default function ProductsPage() {
 
   /*
    * Search
-   *
-   * Search and category are mutually exclusive
-   * because DummyJSON cannot combine them.
    */
   const changeSearch = useCallback(
     (value: string) => {
@@ -190,27 +230,20 @@ export default function ProductsPage() {
         params.set("search", trimmedValue);
 
         /*
-         * Search selected:
-         * remove category.
+         * DummyJSON can't combine
+         * search + category.
          */
         params.delete("category");
       } else {
         params.delete("search");
       }
 
-      /*
-       * Search changes always return
-       * to page 1.
-       */
       params.set("page", "1");
 
       params.set("limit", String(limit));
 
       const newQuery = params.toString();
 
-      /*
-       * Prevent unnecessary navigation.
-       */
       if (newQuery !== queryString) {
         router.push(`/products?${newQuery}`);
       }
@@ -219,7 +252,7 @@ export default function ProductsPage() {
   );
 
   /*
-   * Category
+   * Category filter
    */
   const changeCategory = (value: string) => {
     const params = new URLSearchParams(queryString);
@@ -227,10 +260,6 @@ export default function ProductsPage() {
     if (value) {
       params.set("category", value);
 
-      /*
-       * Category selected:
-       * remove search.
-       */
       params.delete("search");
     } else {
       params.delete("category");
@@ -242,7 +271,7 @@ export default function ProductsPage() {
   };
 
   /*
-   * Sort field
+   * Sort
    */
   const changeSort = (value: string) => {
     const params = new URLSearchParams(queryString);
@@ -282,7 +311,17 @@ export default function ProductsPage() {
 
         <div className="mb-6 space-y-4">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            <h1 className="text-2xl font-bold text-black">Products</h1>
+            <div className="flex items-center gap-3">
+              <h1 className="text-2xl font-bold text-black">Products</h1>
+
+              <button
+                type="button"
+                onClick={() => router.push("/products/add")}
+                className="rounded bg-black px-4 py-2 text-white"
+              >
+                + Add Product
+              </button>
+            </div>
 
             <div className="flex flex-col gap-3 md:flex-row">
               <SearchInput value={search} onSearch={changeSearch} />
@@ -327,6 +366,7 @@ export default function ProductsPage() {
             <p className="mb-4 text-black">{error}</p>
 
             <button
+              type="button"
               onClick={() => window.location.reload()}
               className="rounded bg-black px-4 py-2 text-white"
             >
@@ -349,21 +389,21 @@ export default function ProductsPage() {
           <>
             {/* Product table */}
 
-            <div className="overflow-x-auto rounded border border-gray-200">
+            <div className="hidden overflow-x-auto rounded border border-gray-200 md:block">
               <table className="w-full border-collapse bg-white text-black">
                 <thead className="bg-gray-100">
                   <tr className="border-b border-gray-200">
-                    <th className="p-3 text-left text-black">Image</th>
+                    <th className="p-3 text-left">Image</th>
 
-                    <th className="p-3 text-left text-black">Title</th>
+                    <th className="p-3 text-left">Title</th>
 
-                    <th className="p-3 text-left text-black">Category</th>
+                    <th className="p-3 text-left">Category</th>
 
-                    <th className="p-3 text-left text-black">Price</th>
+                    <th className="p-3 text-left">Price</th>
 
-                    <th className="p-3 text-left text-black">Rating</th>
+                    <th className="p-3 text-left">Rating</th>
 
-                    <th className="p-3 text-left text-black">Stock</th>
+                    <th className="p-3 text-left">Stock</th>
                   </tr>
                 </thead>
 
@@ -375,11 +415,17 @@ export default function ProductsPage() {
                       className="cursor-pointer border-b border-gray-200 hover:bg-gray-50"
                     >
                       <td className="p-3">
-                        <img
-                          src={product.thumbnail}
-                          alt={product.title}
-                          className="h-14 w-14 rounded object-cover"
-                        />
+                        {product.thumbnail ? (
+                          <img
+                            src={product.thumbnail}
+                            alt={product.title}
+                            className="h-14 w-14 rounded object-cover"
+                          />
+                        ) : (
+                          <div className="flex h-14 w-14 items-center justify-center rounded bg-gray-100 text-xs text-black">
+                            No image
+                          </div>
+                        )}
                       </td>
 
                       <td className="p-3 font-medium text-black">
@@ -390,13 +436,54 @@ export default function ProductsPage() {
 
                       <td className="p-3 text-black">${product.price}</td>
 
-                      <td className="p-3 text-black">{product.rating}</td>
+                      <td className="p-3 text-black">
+                        {product.rating ?? "-"}
+                      </td>
 
                       <td className="p-3 text-black">{product.stock}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+            </div>
+
+            {/* Mobile cards */}
+
+            <div className="grid gap-4 md:hidden">
+              {products.map((product) => (
+                <button
+                  type="button"
+                  key={product.id}
+                  onClick={() => router.push(`/products/${product.id}`)}
+                  className="rounded border border-gray-200 bg-white p-4 text-left text-black"
+                >
+                  <div className="flex gap-4">
+                    {product.thumbnail ? (
+                      <img
+                        src={product.thumbnail}
+                        alt={product.title}
+                        className="h-20 w-20 rounded object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded bg-gray-100 text-xs">
+                        No image
+                      </div>
+                    )}
+
+                    <div>
+                      <h2 className="font-semibold">{product.title}</h2>
+
+                      <p className="text-sm">{product.category}</p>
+
+                      <p className="mt-2 font-medium">${product.price}</p>
+
+                      <p className="text-sm">Rating: {product.rating ?? "-"}</p>
+
+                      <p className="text-sm">Stock: {product.stock}</p>
+                    </div>
+                  </div>
+                </button>
+              ))}
             </div>
 
             <Pagination

@@ -4,7 +4,14 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import axios from "axios";
 
-import { getProductById } from "@/services/product.service";
+import { deleteProduct, getProductById } from "@/services/product.service";
+
+import {
+  getDeletedProductIds,
+  getEditedProducts,
+  saveDeletedProduct,
+} from "@/libs/product-local-store";
+
 import { Product } from "@/types/product";
 
 export default function ProductDetailsPage() {
@@ -21,15 +28,17 @@ export default function ProductDetailsPage() {
 
   const [notFound, setNotFound] = useState(false);
 
+  const [deleting, setDeleting] = useState(false);
+
   useEffect(() => {
     const controller = new AbortController();
 
     const loadProduct = async () => {
       /*
-       * Handle URLs such as:
+       * Validate product ID.
        *
        * /products/abc
-       * /products/-5
+       * /products/-1
        */
       if (!Number.isInteger(id) || id <= 0) {
         setNotFound(true);
@@ -41,15 +50,48 @@ export default function ProductDetailsPage() {
         setLoading(true);
         setError("");
         setNotFound(false);
+        setProduct(null);
 
-        const data = await getProductById(id, controller.signal);
+        /*
+         * DummyJSON does not persist deletes.
+         *
+         * If we deleted this product earlier,
+         * treat it as not found.
+         */
+        const deletedProductIds = getDeletedProductIds();
 
-        setProduct(data);
+        if (deletedProductIds.includes(id)) {
+          setNotFound(true);
+          return;
+        }
+
+        /*
+         * Fetch original product.
+         */
+        const apiProduct = await getProductById(id, controller.signal);
+
+        /*
+         * DummyJSON does not persist edits.
+         *
+         * If a locally edited version exists,
+         * prefer it over the API response.
+         */
+        const editedProducts = getEditedProducts();
+
+        const finalProduct = editedProducts[id] ?? apiProduct;
+
+        setProduct(finalProduct);
       } catch (error) {
+        /*
+         * Request intentionally cancelled.
+         */
         if (axios.isCancel(error)) {
           return;
         }
 
+        /*
+         * Product doesn't exist.
+         */
         if (axios.isAxiosError(error) && error.response?.status === 404) {
           setNotFound(true);
           return;
@@ -70,6 +112,44 @@ export default function ProductDetailsPage() {
     };
   }, [id]);
 
+  /*
+   * Delete product.
+   */
+  const handleDelete = async () => {
+    if (!product || deleting) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Are you sure you want to delete "${product.title}"?`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setDeleting(true);
+
+      await deleteProduct(product.id);
+
+      /*
+       * DummyJSON does not actually
+       * persist deletion.
+       */
+      saveDeletedProduct(product.id);
+
+      router.push("/products?page=1&limit=10");
+    } catch {
+      alert("Failed to delete product.");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  /*
+   * Loading
+   */
   if (loading) {
     return (
       <main className="min-h-screen bg-white p-6 text-black">
@@ -80,6 +160,9 @@ export default function ProductDetailsPage() {
     );
   }
 
+  /*
+   * Not found
+   */
   if (notFound) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-white p-6 text-black">
@@ -103,6 +186,9 @@ export default function ProductDetailsPage() {
     );
   }
 
+  /*
+   * Error
+   */
   if (error) {
     return (
       <main className="min-h-screen bg-white p-6 text-black">
@@ -127,16 +213,42 @@ export default function ProductDetailsPage() {
   return (
     <main className="min-h-screen bg-white p-6 text-black">
       <div className="mx-auto max-w-6xl">
-        {/* Back */}
+        {/* Top actions */}
 
-        <button
-          onClick={() => router.back()}
-          className="mb-6 rounded border border-gray-300 bg-white px-4 py-2 text-black hover:bg-gray-100"
-        >
-          ← Back
-        </button>
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+          <button
+            type="button"
+            onClick={() => router.back()}
+            className="rounded border border-gray-300 bg-white px-4 py-2 text-black hover:bg-gray-100"
+          >
+            ← Back
+          </button>
 
-        {/* Product information */}
+          <div className="flex gap-3">
+            {/* Edit */}
+
+            <button
+              type="button"
+              onClick={() => router.push(`/products/${product.id}/edit`)}
+              className="rounded bg-black px-5 py-2 text-white"
+            >
+              Edit Product
+            </button>
+
+            {/* Delete */}
+
+            <button
+              type="button"
+              onClick={handleDelete}
+              disabled={deleting}
+              className="rounded border border-red-500 bg-white px-5 py-2 text-black hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {deleting ? "Deleting..." : "Delete Product"}
+            </button>
+          </div>
+        </div>
+
+        {/* Product */}
 
         <div className="grid gap-10 md:grid-cols-2">
           {/* Images */}
@@ -151,7 +263,7 @@ export default function ProductDetailsPage() {
             </div>
 
             {product.images && product.images.length > 1 && (
-              <div className="grid grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                 {product.images.map((image, index) => (
                   <div
                     key={`${image}-${index}`}
@@ -168,7 +280,7 @@ export default function ProductDetailsPage() {
             )}
           </div>
 
-          {/* Information */}
+          {/* Product info */}
 
           <div>
             <p className="mb-2 text-sm font-medium uppercase text-black">
@@ -182,17 +294,23 @@ export default function ProductDetailsPage() {
             <p className="mb-6 leading-7 text-black">{product.description}</p>
 
             <div className="mb-6 space-y-3">
+              {/* Price */}
+
               <div className="flex justify-between border-b border-gray-200 py-3">
                 <span className="font-medium text-black">Price</span>
 
                 <span className="font-bold text-black">${product.price}</span>
               </div>
 
+              {/* Rating */}
+
               <div className="flex justify-between border-b border-gray-200 py-3">
                 <span className="font-medium text-black">Rating</span>
 
                 <span className="text-black">⭐ {product.rating}</span>
               </div>
+
+              {/* Stock */}
 
               <div className="flex justify-between border-b border-gray-200 py-3">
                 <span className="font-medium text-black">Stock</span>
@@ -224,7 +342,10 @@ export default function ProductDetailsPage() {
                       {review.reviewerName}
                     </p>
 
-                    <p className="text-black">⭐ {review.rating}/5</p>
+                    <p className="text-black">
+                      ⭐ {review.rating}
+                      /5
+                    </p>
                   </div>
 
                   <p className="mb-2 text-black">{review.comment}</p>

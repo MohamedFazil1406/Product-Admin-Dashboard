@@ -25,3 +25,11 @@ export interface ProductResponse {
   skip: number;
   limit: number;
 }
+
+export interface ProductPayload {
+  title: string;
+  description: string;
+  category: string;
+  price: number;
+  stock: number;
+}
