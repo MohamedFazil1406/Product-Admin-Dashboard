@@ -1,5 +1,5 @@
 import api from "@/libs/axios";
-import { ProductResponse } from "@/types/product";
+import { Product, ProductResponse } from "@/types/product";
 
 interface GetProductsParams {
   page: number;
@@ -53,6 +53,17 @@ export const getProducts = async ({
 
 export const getCategories = async (): Promise<string[]> => {
   const response = await api.get<string[]>("/products/category-list");
+
+  return response.data;
+};
+
+export const getProductById = async (
+  id: number,
+  signal?: AbortSignal,
+): Promise<Product> => {
+  const response = await api.get<Product>(`/products/${id}`, {
+    signal,
+  });
 
   return response.data;
 };
