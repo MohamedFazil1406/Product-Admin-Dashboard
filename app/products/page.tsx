@@ -1,49 +1,63 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-
 import { useRouter, useSearchParams } from "next/navigation";
 
-import { getProducts } from "@/services/product.service";
+import { getCategories, getProducts } from "@/services/product.service";
+
 import { Product } from "@/types/product";
 
 import Pagination from "@/components/Pagination";
 import SearchInput from "@/components/SearchInput";
+import ProductFilters from "@/components/ProductFilters";
 
 export default function ProductsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
   /*
-   * Convert searchParams to a string.
-   *
-   * This is safer to use as a dependency than
-   * depending directly on the searchParams object.
+   * Using a string instead of searchParams directly
+   * makes dependencies more stable.
    */
   const queryString = searchParams.toString();
 
+  /*
+   * URL values
+   */
   const pageParam = Number(searchParams.get("page"));
-
   const limitParam = Number(searchParams.get("limit"));
 
   const search = searchParams.get("search") ?? "";
+
+  const category = searchParams.get("category") ?? "";
+
+  const sortBy = searchParams.get("sort") ?? "";
+
+  const order: "asc" | "desc" =
+    searchParams.get("order") === "desc" ? "desc" : "asc";
 
   /*
    * Validate page.
    *
    * ?page=abc
-   * ?page=-1
+   * ?page=-5
    *
-   * both become page 1.
+   * becomes page 1.
    */
   const page = Number.isInteger(pageParam) && pageParam > 0 ? pageParam : 1;
 
   /*
-   * Only allow valid page sizes.
+   * Only allow page sizes required
+   * by the assignment.
    */
   const limit = [10, 20, 50].includes(limitParam) ? limitParam : 10;
 
+  /*
+   * State
+   */
   const [products, setProducts] = useState<Product[]>([]);
+
+  const [categories, setCategories] = useState<string[]>([]);
 
   const [total, setTotal] = useState(0);
 
@@ -52,11 +66,27 @@ export default function ProductsPage() {
   const [error, setError] = useState("");
 
   /*
-   * Load products whenever:
+   * Load categories once.
+   */
+  useEffect(() => {
+    const loadCategories = async () => {
+      try {
+        const data = await getCategories();
+
+        setCategories(data);
+      } catch {
+        console.error("Failed to load categories");
+      }
+    };
+
+    loadCategories();
+  }, []);
+
+  /*
+   * Load products.
    *
-   * page changes
-   * limit changes
-   * search changes
+   * AbortController prevents an older
+   * request from overwriting a newer one.
    */
   useEffect(() => {
     const controller = new AbortController();
@@ -70,16 +100,17 @@ export default function ProductsPage() {
           page,
           limit,
           search,
+          category,
+          sortBy,
+          order,
           signal: controller.signal,
         });
 
-        /*
-         * Protect against invalid URLs:
-         *
-         * ?page=999
-         */
         const totalPages = Math.ceil(data.total / limit);
 
+        /*
+         * Handle ?page=999
+         */
         if (totalPages > 0 && page > totalPages) {
           const params = new URLSearchParams(queryString);
 
@@ -91,17 +122,12 @@ export default function ProductsPage() {
         }
 
         setProducts(data.products);
+
         setTotal(data.total);
       } catch (error) {
         /*
-         * Ignore deliberately cancelled requests.
-         *
-         * Example:
-         *
-         * user searches "phone"
-         * then immediately searches "laptop"
-         *
-         * phone request gets cancelled.
+         * Ignore intentionally cancelled
+         * Axios requests.
          */
         if (error instanceof Error && error.name === "CanceledError") {
           return;
@@ -117,18 +143,13 @@ export default function ProductsPage() {
 
     loadProducts();
 
-    /*
-     * Cancel previous request when
-     * page / limit / search changes.
-     */
     return () => {
       controller.abort();
     };
-  }, [page, limit, search, router, queryString]);
+  }, [page, limit, search, category, sortBy, order, router, queryString]);
 
   /*
-   * Change page while preserving
-   * search and other URL parameters.
+   * Pagination
    */
   const changePage = (newPage: number) => {
     const params = new URLSearchParams(queryString);
@@ -141,7 +162,7 @@ export default function ProductsPage() {
   };
 
   /*
-   * Changing page size resets to page 1.
+   * Page size
    */
   const changeLimit = (newLimit: number) => {
     const params = new URLSearchParams(queryString);
@@ -154,7 +175,10 @@ export default function ProductsPage() {
   };
 
   /*
-   * Called by SearchInput after debounce.
+   * Search
+   *
+   * Search and category are mutually exclusive
+   * because DummyJSON cannot combine them.
    */
   const changeSearch = useCallback(
     (value: string) => {
@@ -164,18 +188,19 @@ export default function ProductsPage() {
 
       if (trimmedValue) {
         params.set("search", trimmedValue);
-      } else {
+
         /*
-         * Empty search:
-         *
-         * remove search completely.
+         * Search selected:
+         * remove category.
          */
+        params.delete("category");
+      } else {
         params.delete("search");
       }
 
       /*
-       * Assignment requirement:
-       * search change resets pagination.
+       * Search changes always return
+       * to page 1.
        */
       params.set("page", "1");
 
@@ -184,13 +209,7 @@ export default function ProductsPage() {
       const newQuery = params.toString();
 
       /*
-       * IMPORTANT:
-       *
-       * Don't navigate if URL is already
-       * exactly the same.
-       *
-       * This helps prevent unnecessary
-       * repeated navigation/rendering.
+       * Prevent unnecessary navigation.
        */
       if (newQuery !== queryString) {
         router.push(`/products?${newQuery}`);
@@ -199,29 +218,100 @@ export default function ProductsPage() {
     [router, queryString, limit],
   );
 
+  /*
+   * Category
+   */
+  const changeCategory = (value: string) => {
+    const params = new URLSearchParams(queryString);
+
+    if (value) {
+      params.set("category", value);
+
+      /*
+       * Category selected:
+       * remove search.
+       */
+      params.delete("search");
+    } else {
+      params.delete("category");
+    }
+
+    params.set("page", "1");
+
+    router.push(`/products?${params.toString()}`);
+  };
+
+  /*
+   * Sort field
+   */
+  const changeSort = (value: string) => {
+    const params = new URLSearchParams(queryString);
+
+    if (value) {
+      params.set("sort", value);
+
+      params.set("order", order);
+    } else {
+      params.delete("sort");
+
+      params.delete("order");
+    }
+
+    params.set("page", "1");
+
+    router.push(`/products?${params.toString()}`);
+  };
+
+  /*
+   * Sort direction
+   */
+  const changeOrder = (value: "asc" | "desc") => {
+    const params = new URLSearchParams(queryString);
+
+    params.set("order", value);
+
+    params.set("page", "1");
+
+    router.push(`/products?${params.toString()}`);
+  };
+
   return (
     <main className="min-h-screen bg-white p-6 text-black">
       <div className="mx-auto max-w-7xl">
         {/* Header */}
 
-        <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <h1 className="text-2xl font-bold text-black">Products</h1>
+        <div className="mb-6 space-y-4">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <h1 className="text-2xl font-bold text-black">Products</h1>
 
-          <div className="flex flex-col gap-3 md:flex-row">
-            <SearchInput value={search} onSearch={changeSearch} />
+            <div className="flex flex-col gap-3 md:flex-row">
+              <SearchInput value={search} onSearch={changeSearch} />
 
-            <select
-              value={limit}
-              onChange={(event) => changeLimit(Number(event.target.value))}
-              className="rounded border border-gray-300 bg-white px-3 py-2 text-black"
-            >
-              <option value={10}>10 per page</option>
+              <select
+                value={limit}
+                onChange={(event) => changeLimit(Number(event.target.value))}
+                className="rounded border border-gray-300 bg-white px-3 py-2 text-black"
+              >
+                <option value={10}>10 per page</option>
 
-              <option value={20}>20 per page</option>
+                <option value={20}>20 per page</option>
 
-              <option value={50}>50 per page</option>
-            </select>
+                <option value={50}>50 per page</option>
+              </select>
+            </div>
           </div>
+
+          {/* Filters */}
+
+          <ProductFilters
+            categories={categories}
+            category={category}
+            sortBy={sortBy}
+            order={order}
+            onCategoryChange={changeCategory}
+            onSortChange={changeSort}
+            onOrderChange={changeOrder}
+          />
         </div>
 
         {/* Loading */}
@@ -244,18 +334,20 @@ export default function ProductsPage() {
             </button>
           </div>
         ) : products.length === 0 ? (
-          /* Empty search result */
+          /* Empty */
 
           <div className="rounded border border-gray-200 p-8 text-center">
             <p className="text-black">
               {search
                 ? `No products found for "${search}".`
-                : "No products found."}
+                : category
+                  ? `No products found in "${category}".`
+                  : "No products found."}
             </p>
           </div>
         ) : (
           <>
-            {/* Desktop table */}
+            {/* Product table */}
 
             <div className="overflow-x-auto rounded border border-gray-200">
               <table className="w-full border-collapse bg-white text-black">
