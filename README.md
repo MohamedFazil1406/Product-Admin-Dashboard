@@ -15,6 +15,29 @@ The application supports authentication, product listing, pagination, search, ca
 
 ---
 
+## Implementation Note
+
+### Technical Choices
+
+I used **Next.js with TypeScript and Tailwind CSS** for the frontend and **Axios** for all API communication. I separated API logic into service files and used one shared Axios instance for base configuration, authentication token handling, and common request behavior.
+
+For the product list, I kept pagination, search, category, and sorting values in the URL so the page state remains consistent after refresh and can be shared through a link.
+
+Because DummyJSON does not persist add, edit, and delete operations, I used `localStorage` as a small client-side persistence layer to keep those changes visible in the application.
+
+### Problem I Faced
+
+One issue I faced was a race condition during product search. If a user typed quickly, an older API request could finish after a newer request and replace the latest search results.
+
+I fixed this by adding a debounce to the search input and using `AbortController` to cancel the previous Axios request whenever the search query changed.
+
+### AI Usage
+
+I used AI as a development assistant for reviewing code structure, debugging issues, discussing edge cases, and improving documentation.
+
+I reviewed and understood the suggested code before using it. I can explain the implementation, architecture, and design decisions and make changes to the application during the technical discussion.
+
+
 ## Features
 
 ### Authentication
