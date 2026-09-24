@@ -10,19 +10,30 @@ interface SearchInputProps {
 export default function SearchInput({ value, onSearch }: SearchInputProps) {
   const [input, setInput] = useState(value);
 
+  /*
+   * Keep local input synchronized
+   * with URL search value.
+   */
   useEffect(() => {
     setInput(value);
   }, [value]);
 
+  /*
+   * Debounce search.
+   */
   useEffect(() => {
-    const timeout = setTimeout(() => {
+    if (input === value) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
       onSearch(input);
     }, 500);
 
     return () => {
-      clearTimeout(timeout);
+      clearTimeout(timer);
     };
-  }, [input, onSearch]);
+  }, [input, value, onSearch]);
 
   return (
     <input
@@ -30,7 +41,7 @@ export default function SearchInput({ value, onSearch }: SearchInputProps) {
       value={input}
       onChange={(event) => setInput(event.target.value)}
       placeholder="Search products..."
-      className="w-full rounded border px-3 py-2 md:w-72"
+      className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-black placeholder:text-gray-500 md:w-72"
     />
   );
 }
